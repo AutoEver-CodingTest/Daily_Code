@@ -46,7 +46,7 @@ jobs:
           touch "$ROOT_DIR/김태민/.gitkeep"
           touch "$ROOT_DIR/추창우/.gitkeep"
 
-          echo "오늘도 다들 화이팅!"
+          echo "Created $ROOT_DIR with subfolders."
           echo "TODAY=$TODAY" >> $GITHUB_ENV
           echo "changed=true" >> $GITHUB_OUTPUT
 
@@ -56,5 +56,5 @@ jobs:
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
-          git commit -m "chore: create folder for ${TODAY:-$(date +'%Y-%m-%d')} with subfolders"
+          git commit -m "${TODAY:-$(date +'%Y-%m-%d')}일 태스크 배정완료, 화이팅!"
           git push
