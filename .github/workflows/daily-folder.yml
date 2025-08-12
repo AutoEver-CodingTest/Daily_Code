@@ -24,7 +24,7 @@ jobs:
       - name: Create today's folder with subfolders
         id: mk
         run: |
-          TODAY=$(date +'%Y-%m-%d')  # 예: 2025-08-12
+          TODAY=$(date +'%Y-%m-%d')
           ROOT_DIR="${TODAY}"
 
           if [ -d "$ROOT_DIR" ]; then
@@ -33,14 +33,20 @@ jobs:
             exit 0
           fi
 
-          mkdir -p "$ROOT_DIR/홍길동"
-          mkdir -p "$ROOT_DIR/김춘식"
+          mkdir -p "$ROOT_DIR/곽태근"
+          mkdir -p "$ROOT_DIR/김호집"
+          mkdir -p "$ROOT_DIR/오창은"
+          mkdir -p "$ROOT_DIR/김태민"
+          mkdir -p "$ROOT_DIR/추창우"
 
           # 빈 폴더 커밋을 위해 .gitkeep 파일 추가
-          touch "$ROOT_DIR/홍길동/.gitkeep"
-          touch "$ROOT_DIR/김춘식/.gitkeep"
+          touch "$ROOT_DIR/곽태근/.gitkeep"
+          touch "$ROOT_DIR/김호집/.gitkeep"
+          touch "$ROOT_DIR/오창은/.gitkeep"
+          touch "$ROOT_DIR/김태민/.gitkeep"
+          touch "$ROOT_DIR/추창우/.gitkeep"
 
-          echo "Created $ROOT_DIR with subfolders."
+          echo "오늘도 다들 화이팅!"
           echo "TODAY=$TODAY" >> $GITHUB_ENV
           echo "changed=true" >> $GITHUB_OUTPUT
 
