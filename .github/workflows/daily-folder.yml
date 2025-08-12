@@ -1,0 +1,54 @@
+name: Daily folder (KST midnight)
+
+on:
+  schedule:
+    # KST 00:00 = UTC 15:00 (전날)
+    - cron: '0 15 * * *'
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+jobs:
+  create_today_folder:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set timezone to Asia/Seoul
+        run: |
+          sudo timedatectl set-timezone Asia/Seoul
+          date
+
+      - name: Create today's folder with subfolders
+        id: mk
+        run: |
+          TODAY=$(date +'%Y-%m-%d')  # 예: 2025-08-12
+          ROOT_DIR="${TODAY}"
+
+          if [ -d "$ROOT_DIR" ]; then
+            echo "Directory $ROOT_DIR already exists."
+            echo "changed=false" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+
+          mkdir -p "$ROOT_DIR/홍길동"
+          mkdir -p "$ROOT_DIR/김춘식"
+
+          # 빈 폴더 커밋을 위해 .gitkeep 파일 추가
+          touch "$ROOT_DIR/홍길동/.gitkeep"
+          touch "$ROOT_DIR/김춘식/.gitkeep"
+
+          echo "Created $ROOT_DIR with subfolders."
+          echo "TODAY=$TODAY" >> $GITHUB_ENV
+          echo "changed=true" >> $GITHUB_OUTPUT
+
+      - name: Commit & push if changed
+        if: steps.mk.outputs.changed == 'true'
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "chore: create folder for ${TODAY:-$(date +'%Y-%m-%d')} with subfolders"
+          git push
