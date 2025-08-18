@@ -13,11 +13,11 @@ READ_ME = "README.md"
 START_MARK = "<!-- PROGRESS_START -->"
 END_MARK = "<!-- PROGRESS_END -->"
 TZ_OFFSET = "+0900"  # Asia/Seoul (KST)
-WEEK_START = calendar.SUNDAY
-DOT_GREEN = "🟢"  # 그날 커밋 + 목표 달성
+WEEK_START = calendar.SUNDAY  # 달력 시작: 일요일
+DOT_GREEN  = "🟢"  # 그날 커밋 + 목표 달성
 DOT_ORANGE = "🟠"  # 다른날 커밋 + 목표 달성
-DOT_YELLOW = "🟡"  # 커밋은 있지만 목표 미달
-DOT_RED = "🔴"  # 커밋 없음
+DOT_YELLOW = "🟡"  # 커밋 있음 + 목표 미달
+DOT_RED    = "🔴"  # 비봇 커밋 없음
 # ==============
 
 calendar.setfirstweekday(WEEK_START)
@@ -29,6 +29,7 @@ def run(cmd):
 # ---------- 커밋/메시지 판정 ----------
 
 def git_subjects_for_date_and_path(date_str, path):
+    """특정 날짜(KST)의 해당 path 커밋 subject 목록"""
     since = f"{date_str} 00:00:00 {TZ_OFFSET}"
     until = f"{date_str} 23:59:59 {TZ_OFFSET}"
     cmd = (
@@ -41,6 +42,10 @@ def git_subjects_for_date_and_path(date_str, path):
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 def latest_nonbot_commit_date_for_path(path):
+    """
+    해당 path에 대한 '비봇' 커밋 중 가장 최근 커밋의 날짜(YYYY-MM-DD, KST 기준)를 반환.
+    없으면 None.
+    """
     cmd = f'git log --pretty="%ad%x09%s" --date=format-local:"%Y-%m-%d" -- "{path}" || true'
     out = run(cmd)
     if not out:
@@ -63,7 +68,12 @@ def latest_nonbot_commit_date_for_path(path):
     return None
 
 def commit_flag(date_str, name):
-    """커밋 유무 판정: 'O'=그날 비봇, 'L'=다른날 비봇, 'X'=없음"""
+    """
+    커밋 관점 판정:
+      'O' = 그날 비봇 커밋,
+      'L' = 다른 날 비봇 커밋,
+      'X' = 비봇 커밋 없음
+    """
     path = f"{date_str}/{name}"
     subjects_today = git_subjects_for_date_and_path(date_str, path)
     for s in subjects_today:
@@ -74,33 +84,49 @@ def commit_flag(date_str, name):
         return "L"
     return "X"
 
-# ---------- 파일 개수 ----------
+# ---------- 파일 개수(그 날짜 스냅샷) ----------
 
 def commit_at_end_of_date(date_str):
+    """해당 날짜(KST 23:59:59)의 리포 스냅샷 커밋 해시 반환(없으면 빈 문자열)"""
     until = f'{date_str} 23:59:59 {TZ_OFFSET}'
     cmd = f'git rev-list -1 --before="{until}" HEAD || true'
     return run(cmd).strip()
 
 def file_count_in_path_at_commit(commit, path):
+    """
+    특정 커밋에서 path/ 디렉터리 '바로 아래' 파일(=blob) 개수와 .gitkeep 포함 여부 반환.
+    재귀로 전체 파일을 받은 뒤, base 바로 아래만 필터링한다.
+    """
     if not commit:
         return 0, False
-    cmd = f'git ls-tree {commit} "{path}" || true'
+
+    base = path.rstrip("/") + "/"
+    # 재귀로 모든 파일 경로를 받고, base 바로 아래만 카운트
+    cmd = f'git ls-tree -r --name-only {commit} -- "{base}" || true'
     out = run(cmd)
     if not out:
         return 0, False
+
     count = 0
     has_gitkeep = False
     for line in out.splitlines():
-        parts = line.split("\t", 1)
-        meta = parts[0]
-        name = parts[1] if len(parts) > 1 else ""
-        if " blob " in meta:
-            count += 1
-            if os.path.basename(name) == ".gitkeep":
-                has_gitkeep = True
+        name = line.strip()
+        if not name.startswith(base):
+            continue
+        rest = name[len(base):]  # base 이후
+        if "/" in rest:
+            # 하위 디렉터리 내부는 제외 (바로 아래만 카운트)
+            continue
+        count += 1
+        if rest == ".gitkeep":
+            has_gitkeep = True
     return count, has_gitkeep
 
 def file_req_and_status(date_str, name):
+    """
+    (파일개수, 목표개수, 충족여부) 반환.
+    목표: .gitkeep 있으면 4, 없으면 3 (해당 날짜 23:59:59 KST 스냅샷 기준)
+    """
     commit = commit_at_end_of_date(date_str)
     path = f"{date_str}/{name}"
     cnt, has_gitkeep = file_count_in_path_at_commit(commit, path)
@@ -111,6 +137,7 @@ def file_req_and_status(date_str, name):
 # ---------- 달력 렌더링 ----------
 
 def find_all_date_dirs():
+    """리포 내 YYYY-MM-DD 디렉터리들을 찾아 실제 날짜 리스트 반환."""
     dates = []
     for entry in os.listdir("."):
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry) and os.path.isdir(entry):
@@ -122,6 +149,7 @@ def find_all_date_dirs():
     return sorted(dates)
 
 def month_iter(start_date, end_date):
+    """start_date의 1일 ~ end_date의 1일까지 월 단위 이터레이션."""
     y, m = start_date.year, start_date.month
     while (y < end_date.year) or (y == end_date.year and m <= end_date.month):
         yield y, m
@@ -143,8 +171,10 @@ def build_month_calendar(year, month, today_kst):
             if d == 0:
                 tds.append("<td></td>")
                 continue
+
             date_obj = datetime.date(year, month, d)
             if date_obj >= today_kst:
+                # 오늘/미래 날짜는 빈 칸
                 tds.append(
                     f'<td align="center" valign="top">'
                     f'<div align="right"><sub>{d}</sub></div>'
@@ -155,9 +185,11 @@ def build_month_calendar(year, month, today_kst):
             date_str = date_obj.isoformat()
             lines = []
             for name in NAMES:
+                # 커밋/파일 판정
                 cf = commit_flag(date_str, name)  # 'O','L','X'
                 cnt, req, ok = file_req_and_status(date_str, name)
 
+                # 색상 결정
                 if cf == "O":
                     dot = DOT_GREEN if ok else DOT_YELLOW
                 elif cf == "L":
@@ -187,7 +219,7 @@ def build_month_calendar(year, month, today_kst):
         "🟠=다른날 커밋+목표달성, "
         "🟡=커밋있음+목표미달, "
         "🔴=커밋없음 · "
-        "<code>n/m</code>=파일개수/목표"
+        "<code>n/m</code>=파일개수/목표(.gitkeep 있으면 m=4, 없으면 m=3)"
         "</sub>"
     )
     table_html = (
@@ -206,6 +238,7 @@ def build_all_months(today_kst):
         start = datetime.date(date_dirs[0].year, date_dirs[0].month, 1)
     else:
         start = datetime.date(today_kst.year, today_kst.month, 1)
+
     end = datetime.date(today_kst.year, today_kst.month, 1)
     blocks = []
     for y, m in month_iter(start, end):
@@ -231,13 +264,17 @@ def replace_block(original, new_block):
 def main():
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
     today_kst = now.date()
+
     new_block = build_all_months(today_kst)
+
     if os.path.exists(READ_ME):
         with open(READ_ME, "r", encoding="utf-8") as f:
             content = f.read()
     else:
         content = "# 코딩테스트 연습\n"
+
     updated = replace_block(content, new_block)
+
     if updated != content:
         with open(READ_ME, "w", encoding="utf-8") as f:
             f.write(updated)
