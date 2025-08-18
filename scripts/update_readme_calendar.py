@@ -13,21 +13,22 @@ READ_ME = "README.md"
 START_MARK = "<!-- PROGRESS_START -->"
 END_MARK = "<!-- PROGRESS_END -->"
 TZ_OFFSET = "+0900"  # Asia/Seoul (KST)
-WEEK_START = calendar.SUNDAY  # 달력 시작: 일요일
-DOT_O = "🟢"  # 해당 날짜에 비봇 커밋 존재
-DOT_L = "🟠"  # 해당 날짜엔 없지만 다른 날짜에 비봇 커밋 존재(레트로)
-DOT_X = "🔴"  # 봇 커밋만 있거나 커밋 없음
+WEEK_START = calendar.SUNDAY
+DOT_GREEN = "🟢"  # 그날 커밋 + 목표 달성
+DOT_ORANGE = "🟠"  # 다른날 커밋 + 목표 달성
+DOT_YELLOW = "🟡"  # 커밋은 있지만 목표 미달
+DOT_RED = "🔴"  # 커밋 없음
 # ==============
 
 calendar.setfirstweekday(WEEK_START)
-
 BOT_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}일자 태스크 배정완료, 화이팅!$")
 
 def run(cmd):
     return subprocess.check_output(cmd, shell=True, text=True, encoding="utf-8").strip()
 
+# ---------- 커밋/메시지 판정 ----------
+
 def git_subjects_for_date_and_path(date_str, path):
-    """특정 날짜 KST 범위의 커밋 subject들(해당 path에 한정)"""
     since = f"{date_str} 00:00:00 {TZ_OFFSET}"
     until = f"{date_str} 23:59:59 {TZ_OFFSET}"
     cmd = (
@@ -40,11 +41,6 @@ def git_subjects_for_date_and_path(date_str, path):
     return [line.strip() for line in out.splitlines() if line.strip()]
 
 def latest_nonbot_commit_date_for_path(path):
-    """
-    해당 path를 건드린 커밋 중 '봇이 아닌' 가장 최근 커밋의 날짜(YYYY-MM-DD, 로컬=KST)를 반환.
-    없으면 None.
-    """
-    # 워크플로우에서 시스템 타임존을 Asia/Seoul로 설정하므로 --date=format-local 사용
     cmd = f'git log --pretty="%ad%x09%s" --date=format-local:"%Y-%m-%d" -- "{path}" || true'
     out = run(cmd)
     if not out:
@@ -53,48 +49,68 @@ def latest_nonbot_commit_date_for_path(path):
         line = line.strip()
         if not line:
             continue
-        try:
+        if "\t" in line:
             date_part, subject = line.split("\t", 1)
-        except ValueError:
-            # 탭이 없을 수도 있으니 방어
+        else:
             parts = line.split(" ", 1)
-            if len(parts) == 2:
-                date_part, subject = parts
-            else:
+            if len(parts) != 2:
                 continue
+            date_part, subject = parts
         subject = subject.strip()
-        # 봇 커밋은 건너뛴다(어떤 날짜든)
         if BOT_REGEX.match(subject):
             continue
-        # 비봇 커밋이면 그 커밋의 날짜를 반환
         return date_part
     return None
 
-def judge_day(date_str, name):
-    """
-    반환: 'O' / 'L' / 'X'
-      - 'O' : 해당 날짜에 비봇 커밋 존재
-      - 'L' : 해당 날짜엔 없지만, 다른 날짜에 비봇 커밋 존재(레트로)
-      - 'X' : 봇 커밋만 있거나 커밋 없음
-    """
+def commit_flag(date_str, name):
+    """커밋 유무 판정: 'O'=그날 비봇, 'L'=다른날 비봇, 'X'=없음"""
     path = f"{date_str}/{name}"
     subjects_today = git_subjects_for_date_and_path(date_str, path)
-
-    # 오늘자 범위에서 봇 외 커밋이 하나라도 있으면 O
     for s in subjects_today:
         if not BOT_REGEX.match(s):
             return "O"
-
-    # 오늘자엔 없었으나, 과거/미래 다른 날짜에 비봇 커밋이 있으면 L
     nonbot_any_date = latest_nonbot_commit_date_for_path(path)
     if nonbot_any_date is not None and nonbot_any_date != date_str:
         return "L"
-
-    # 그 외에는 X
     return "X"
 
+# ---------- 파일 개수 ----------
+
+def commit_at_end_of_date(date_str):
+    until = f'{date_str} 23:59:59 {TZ_OFFSET}'
+    cmd = f'git rev-list -1 --before="{until}" HEAD || true'
+    return run(cmd).strip()
+
+def file_count_in_path_at_commit(commit, path):
+    if not commit:
+        return 0, False
+    cmd = f'git ls-tree {commit} "{path}" || true'
+    out = run(cmd)
+    if not out:
+        return 0, False
+    count = 0
+    has_gitkeep = False
+    for line in out.splitlines():
+        parts = line.split("\t", 1)
+        meta = parts[0]
+        name = parts[1] if len(parts) > 1 else ""
+        if " blob " in meta:
+            count += 1
+            if os.path.basename(name) == ".gitkeep":
+                has_gitkeep = True
+    return count, has_gitkeep
+
+def file_req_and_status(date_str, name):
+    commit = commit_at_end_of_date(date_str)
+    path = f"{date_str}/{name}"
+    cnt, has_gitkeep = file_count_in_path_at_commit(commit, path)
+    required = 4 if has_gitkeep else 3
+    ok = cnt >= required
+    return cnt, required, ok
+
+# ---------- 달력 렌더링 ----------
+
 def find_all_date_dirs():
-    """리포 내 YYYY-MM-DD 디렉터리들을 찾아 실제 날짜 리스트 반환."""
     dates = []
     for entry in os.listdir("."):
         if re.fullmatch(r"\d{4}-\d{2}-\d{2}", entry) and os.path.isdir(entry):
@@ -106,7 +122,6 @@ def find_all_date_dirs():
     return sorted(dates)
 
 def month_iter(start_date, end_date):
-    """start_date의 1일 ~ end_date의 1일까지 월 단위 이터레이션."""
     y, m = start_date.year, start_date.month
     while (y < end_date.year) or (y == end_date.year and m <= end_date.month):
         yield y, m
@@ -128,10 +143,8 @@ def build_month_calendar(year, month, today_kst):
             if d == 0:
                 tds.append("<td></td>")
                 continue
-
             date_obj = datetime.date(year, month, d)
             if date_obj >= today_kst:
-                # 오늘/미래 날짜는 빈 칸
                 tds.append(
                     f'<td align="center" valign="top">'
                     f'<div align="right"><sub>{d}</sub></div>'
@@ -142,17 +155,24 @@ def build_month_calendar(year, month, today_kst):
             date_str = date_obj.isoformat()
             lines = []
             for name in NAMES:
-                flag = judge_day(date_str, name)  # 'O' / 'L' / 'X'
-                if flag == "O":
-                    dot = DOT_O
-                elif flag == "L":
-                    dot = DOT_L
+                cf = commit_flag(date_str, name)  # 'O','L','X'
+                cnt, req, ok = file_req_and_status(date_str, name)
+
+                if cf == "O":
+                    dot = DOT_GREEN if ok else DOT_YELLOW
+                elif cf == "L":
+                    dot = DOT_ORANGE if ok else DOT_YELLOW
                 else:
-                    dot = DOT_X
-                lines.append(f"<div style='font-size:13px'>{name}: {dot}</div>")
+                    dot = DOT_RED
+
+                pass_icon = "✅" if ok else "❌"
+                lines.append(
+                    f"<div style='font-size:13px'>{name}: {dot} "
+                    f"<span style='font-size:12px'>(<code>{cnt}/{req}</code> {pass_icon})</span></div>"
+                )
 
             cell_html = (
-                '<td align="center" valign="top" style="min-width:150px">'
+                '<td align="center" valign="top" style="min-width:170px">'
                 f'<div align="right"><sub>{d}</sub></div>'
                 + "".join(lines) +
                 "</td>"
@@ -163,9 +183,11 @@ def build_month_calendar(year, month, today_kst):
     month_title = f"### {year}-{month:02d} 코딩테스트 달력 (KST)"
     legend = (
         "<sub>"
-        "🟢=당일 커밋, "
-        "🟠=다른 날 커밋, "
-        "🔴=안함"
+        "🟢=그날 커밋+목표달성, "
+        "🟠=다른날 커밋+목표달성, "
+        "🟡=커밋있음+목표미달, "
+        "🔴=커밋없음 · "
+        "<code>n/m</code>=파일개수/목표"
         "</sub>"
     )
     table_html = (
@@ -184,7 +206,6 @@ def build_all_months(today_kst):
         start = datetime.date(date_dirs[0].year, date_dirs[0].month, 1)
     else:
         start = datetime.date(today_kst.year, today_kst.month, 1)
-
     end = datetime.date(today_kst.year, today_kst.month, 1)
     blocks = []
     for y, m in month_iter(start, end):
@@ -210,17 +231,13 @@ def replace_block(original, new_block):
 def main():
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
     today_kst = now.date()
-
     new_block = build_all_months(today_kst)
-
     if os.path.exists(READ_ME):
         with open(READ_ME, "r", encoding="utf-8") as f:
             content = f.read()
     else:
         content = "# 코딩테스트 연습\n"
-
     updated = replace_block(content, new_block)
-
     if updated != content:
         with open(READ_ME, "w", encoding="utf-8") as f:
             f.write(updated)
