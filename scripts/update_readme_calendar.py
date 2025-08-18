@@ -41,31 +41,29 @@ def git_subjects_for_date_and_path(date_str, path):
         return []
     return [line.strip() for line in out.splitlines() if line.strip()]
 
-def latest_nonbot_commit_date_for_path(path):
+def latest_nonbot_commit_for_path(path):
     """
-    해당 path에 대한 '비봇' 커밋 중 가장 최근 커밋의 날짜(YYYY-MM-DD, KST 기준)를 반환.
-    없으면 None.
+    해당 path에 대한 '비봇' 커밋 중 가장 최근 항목의 (날짜, 커밋해시)를 반환.
+    없으면 (None, None).
     """
-    cmd = f'git log --pretty="%ad%x09%s" --date=format-local:"%Y-%m-%d" -- "{path}" || true'
+    # 날짜는 KST 로컬 포맷, 해시는 별도로 얻기 위해 %H 추가
+    cmd = f'git log --pretty="%H%x09%ad%x09%s" --date=format-local:"%Y-%m-%d" -- "{path}" || true'
     out = run(cmd)
     if not out:
-        return None
+        return None, None
     for line in out.splitlines():
         line = line.strip()
         if not line:
             continue
-        if "\t" in line:
-            date_part, subject = line.split("\t", 1)
-        else:
-            parts = line.split(" ", 1)
-            if len(parts) != 2:
-                continue
-            date_part, subject = parts
+        parts = line.split("\t", 2)
+        if len(parts) != 3:
+            continue
+        commit_hash, date_str, subject = parts
         subject = subject.strip()
         if BOT_REGEX.match(subject):
             continue
-        return date_part
-    return None
+        return date_str, commit_hash
+    return None, None
 
 def commit_flag(date_str, name):
     """
@@ -79,12 +77,12 @@ def commit_flag(date_str, name):
     for s in subjects_today:
         if not BOT_REGEX.match(s):
             return "O"
-    nonbot_any_date = latest_nonbot_commit_date_for_path(path)
-    if nonbot_any_date is not None and nonbot_any_date != date_str:
+    nonbot_date, _ = latest_nonbot_commit_for_path(path)
+    if nonbot_date is not None and nonbot_date != date_str:
         return "L"
     return "X"
 
-# ---------- 파일 개수(그 날짜 스냅샷; 재귀 카운트) ----------
+# ---------- 스냅샷 & 파일 개수 (재귀) ----------
 
 def commit_at_end_of_date(date_str):
     """해당 날짜(KST 23:59:59)의 리포 스냅샷 커밋 해시 반환(없으면 빈 문자열)"""
@@ -92,45 +90,61 @@ def commit_at_end_of_date(date_str):
     cmd = f'git rev-list -1 --before="{until}" HEAD || true'
     return run(cmd).strip()
 
-def file_count_in_path_at_commit(commit, path):
+def count_files_recursive_at_commit(commit, base_dir):
     """
-    특정 커밋에서 path/ 디렉터리 '아래 전체(재귀)' 파일(=blob) 개수와 .gitkeep 존재 여부 반환.
-    - git ls-tree -r --name-only {commit} -- "{base}" 로 모든 파일을 받고 base로 시작하는 것만 필터.
+    특정 커밋에서 base_dir/ 아래의 모든 파일(=blob) 리스트와 .gitkeep 존재 여부 반환.
+    - 출력: (파일경로목록(list[str]), has_gitkeep(bool))
     """
     if not commit:
-        return 0, False
-
-    base = path.rstrip("/") + "/"
+        return [], False
+    base = base_dir.rstrip("/") + "/"
     cmd = f'git ls-tree -r --name-only {commit} -- "{base}" || true'
     out = run(cmd)
     if not out:
-        return 0, False
+        return [], False
 
     files = []
     has_gitkeep = False
     for line in out.splitlines():
         name = line.strip()
-        if not name:
-            continue
-        if not name.startswith(base):
+        if not name or not name.startswith(base):
             continue
         files.append(name)
         if os.path.basename(name) == ".gitkeep":
             has_gitkeep = True
+    return files, has_gitkeep
 
-    return len(files), has_gitkeep
-
-def file_req_and_status(date_str, name):
+def snapshot_for_display_and_goal(date_str, name, cf):
     """
-    (파일개수, 목표개수, 충족여부) 반환.
-    목표: .gitkeep 있으면 4, 없으면 3 (해당 날짜 23:59:59 KST 스냅샷 기준)
+    표시/판정에 사용할 '스냅샷 커밋'을 선택하고, 그 스냅샷에서:
+      - 표시용 파일 개수(display_n): .gitkeep 제외
+      - 목표값(m): .gitkeep 있으면 4, 없으면 3
+      - 충족 여부(ok): (표시용이 아니라 실제 전체 파일수 >= m)
+    반환: (display_n, m, ok)
     """
-    commit = commit_at_end_of_date(date_str)
     path = f"{date_str}/{name}"
-    cnt, has_gitkeep = file_count_in_path_at_commit(commit, path)
-    required = 4 if has_gitkeep else 3
-    ok = cnt >= required
-    return cnt, required, ok
+
+    if cf == "O":
+        # 같은 날: 그날 끝 스냅샷
+        commit = commit_at_end_of_date(date_str)
+    elif cf == "L":
+        # 레트로: 최신 비봇 커밋 스냅샷
+        _, commit = latest_nonbot_commit_for_path(path)
+        if not commit:
+            # 안전망: 없으면 그날 스냅샷 시도
+            commit = commit_at_end_of_date(date_str)
+    else:  # 'X'
+        # 비봇 커밋 없으면 그날 스냅샷으로 계산(대개 0)
+        commit = commit_at_end_of_date(date_str)
+
+    files, has_gitkeep = count_files_recursive_at_commit(commit, path)
+    total_including_gitkeep = len(files)
+    # 표시용 개수는 .gitkeep 제외
+    display_n = total_including_gitkeep - (1 if any(os.path.basename(f) == ".gitkeep" for f in files) else 0)
+    # 목표값 산정
+    m = 4 if has_gitkeep else 3
+    ok = total_including_gitkeep >= m
+    return display_n, m, ok
 
 # ---------- 달력 렌더링 ----------
 
@@ -184,7 +198,7 @@ def build_month_calendar(year, month, today_kst):
             lines = []
             for name in NAMES:
                 cf = commit_flag(date_str, name)  # 'O','L','X'
-                cnt, req, ok = file_req_and_status(date_str, name)
+                display_n, m, ok = snapshot_for_display_and_goal(date_str, name, cf)
 
                 if cf == "O":
                     dot = DOT_GREEN if ok else DOT_YELLOW
@@ -192,15 +206,16 @@ def build_month_calendar(year, month, today_kst):
                     dot = DOT_ORANGE if ok else DOT_YELLOW
                 else:
                     dot = DOT_RED
+                    # cf == 'X'일 땐 ok 의미가 없지만, 표시 일관성을 위해 (n/m) 그대로 둠.
 
-                pass_icon = "✅" if ok else "❌"
+                # 👉 표시를 심플하게: "이름: 🟡 (n/m)"
                 lines.append(
                     f"<div style='font-size:13px'>{name}: {dot} "
-                    f"<span style='font-size:12px'>(<code>{cnt}/{req}</code> {pass_icon})</span></div>"
+                    f"(<code>{display_n}/{m}</code>)</div>"
                 )
 
             cell_html = (
-                '<td align="center" valign="top" style="min-width:170px">'
+                '<td align="center" valign="top" style="min-width:150px">'
                 f'<div align="right"><sub>{d}</sub></div>'
                 + "".join(lines) +
                 "</td>"
@@ -215,8 +230,7 @@ def build_month_calendar(year, month, today_kst):
         "🟠=다른날 커밋+목표달성, "
         "🟡=커밋있음+목표미달, "
         "🔴=커밋없음 · "
-        "<code>n/m</code>=파일개수/목표(.gitkeep 있으면 m=4, 없으면 m=3)"
-        "</sub>"
+        "(표시 n은 .gitkeep 제외)</sub>"
     )
     table_html = (
         f"{month_title}\n\n"
