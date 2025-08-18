@@ -84,7 +84,7 @@ def commit_flag(date_str, name):
         return "L"
     return "X"
 
-# ---------- 파일 개수(그 날짜 스냅샷) ----------
+# ---------- 파일 개수(그 날짜 스냅샷; 재귀 카운트) ----------
 
 def commit_at_end_of_date(date_str):
     """해당 날짜(KST 23:59:59)의 리포 스냅샷 커밋 해시 반환(없으면 빈 문자열)"""
@@ -94,33 +94,31 @@ def commit_at_end_of_date(date_str):
 
 def file_count_in_path_at_commit(commit, path):
     """
-    특정 커밋에서 path/ 디렉터리 '바로 아래' 파일(=blob) 개수와 .gitkeep 포함 여부 반환.
-    재귀로 전체 파일을 받은 뒤, base 바로 아래만 필터링한다.
+    특정 커밋에서 path/ 디렉터리 '아래 전체(재귀)' 파일(=blob) 개수와 .gitkeep 존재 여부 반환.
+    - git ls-tree -r --name-only {commit} -- "{base}" 로 모든 파일을 받고 base로 시작하는 것만 필터.
     """
     if not commit:
         return 0, False
 
     base = path.rstrip("/") + "/"
-    # 재귀로 모든 파일 경로를 받고, base 바로 아래만 카운트
     cmd = f'git ls-tree -r --name-only {commit} -- "{base}" || true'
     out = run(cmd)
     if not out:
         return 0, False
 
-    count = 0
+    files = []
     has_gitkeep = False
     for line in out.splitlines():
         name = line.strip()
+        if not name:
+            continue
         if not name.startswith(base):
             continue
-        rest = name[len(base):]  # base 이후
-        if "/" in rest:
-            # 하위 디렉터리 내부는 제외 (바로 아래만 카운트)
-            continue
-        count += 1
-        if rest == ".gitkeep":
+        files.append(name)
+        if os.path.basename(name) == ".gitkeep":
             has_gitkeep = True
-    return count, has_gitkeep
+
+    return len(files), has_gitkeep
 
 def file_req_and_status(date_str, name):
     """
@@ -185,11 +183,9 @@ def build_month_calendar(year, month, today_kst):
             date_str = date_obj.isoformat()
             lines = []
             for name in NAMES:
-                # 커밋/파일 판정
                 cf = commit_flag(date_str, name)  # 'O','L','X'
                 cnt, req, ok = file_req_and_status(date_str, name)
 
-                # 색상 결정
                 if cf == "O":
                     dot = DOT_GREEN if ok else DOT_YELLOW
                 elif cf == "L":
