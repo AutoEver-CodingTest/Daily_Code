@@ -2,7 +2,7 @@ name: Update README calendar (KST daily)
 
 on:
   schedule:
-    # KST 00:02 = UTC 15:02 (전날)
+    # KST 00:02 = UTC 15:02 (전날 기준)
     - cron: '2 15 * * *'
   workflow_dispatch: {}
 
@@ -14,33 +14,60 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout
+      - name: Checkout (full history)
         uses: actions/checkout@v4
         with:
-          fetch-depth: 0  # 달력 집계용으로 이전 커밋까지 모두 필요
+          fetch-depth: 0  # 히스토리/스냅샷 계산에 필요
 
-      - name: Set timezone to Asia/Seoul
+      - name: Set timezone & Git i18n (KST & UTF-8)
         run: |
           sudo timedatectl set-timezone Asia/Seoul
+          git config --global core.quotepath false
+          git config --global i18n.commitEncoding utf-8
+          git config --global i18n.logOutputEncoding utf-8
           date
+          locale
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
           python-version: '3.x'
 
+      # (선택) 어제 스냅샷 디버그 - 필요시 주석 해제해서 사용
+      # - name: Debug snapshot (yesterday)
+      #   run: |
+      #     python3 - << 'PY'
+      #     import subprocess, datetime
+      #     def run(cmd):
+      #         print("$", cmd)
+      #         print(subprocess.check_output(cmd, shell=True, text=True, encoding="utf-8"))
+      #     KST = datetime.timezone(datetime.timedelta(hours=9))
+      #     y = (datetime.datetime.now(KST) - datetime.timedelta(days=1)).date().isoformat()
+      #     until = f'{y} 23:59:59 +0900'
+      #     commit = subprocess.check_output(f'git rev-list -1 --before="{until}" HEAD || true', shell=True, text=True).strip()
+      #     print("DATE:", y, "COMMIT:", commit)
+      #     for n in ["곽태근","김호집","오창은","김태민","추창우"]:
+      #         base = f"{y}/{n}".rstrip("/") + "/"
+      #         cmd = f'git ls-tree -r --name-only {commit} -- "{base}" || true'
+      #         run(cmd)
+      #     PY
+
       - name: Generate calendar into README
         run: |
           python3 scripts/update_readme_calendar.py
 
-      - name: Commit & push if changed
+      - name: Commit & push if README changed
         run: |
-          if git diff --quiet README.md; then
+          # README 변경 없으면 종료
+          if git diff --quiet -- README.md; then
             echo "No changes in README.md"
             exit 0
           fi
+
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
+          # 변경 내용 커밋/푸시
           git add README.md
           KST_NOW=$(date +'%Y-%m-%d %H:%M')
           git commit -m "README 달력 자동 업데이트: ${KST_NOW} KST"
