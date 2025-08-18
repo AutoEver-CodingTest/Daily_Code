@@ -6,7 +6,6 @@ import datetime
 import calendar
 import os
 import re
-from collections import defaultdict
 
 # ===== 설정 =====
 NAMES = ["곽태근", "김호집", "오창은", "김태민", "추창우"]
@@ -14,9 +13,9 @@ READ_ME = "README.md"
 START_MARK = "<!-- PROGRESS_START -->"
 END_MARK = "<!-- PROGRESS_END -->"
 TZ_OFFSET = "+0900"  # Asia/Seoul (KST)
-WEEK_START = calendar.SUNDAY  # 달력 머리: 일 ~ 토
-DOT_O = "🟢"  # O
-DOT_X = "🔴"  # X
+WEEK_START = calendar.SUNDAY  # 달력 시작: 일요일
+DOT_O = "🟢"  # 개인 커밋 존재
+DOT_X = "🔴"  # 봇 커밋만 있거나 없음
 # ==============
 
 calendar.setfirstweekday(WEEK_START)
@@ -65,7 +64,7 @@ def find_all_date_dirs():
     return sorted(dates)
 
 def month_iter(start_date, end_date):
-    """start_date의 1일 ~ end_date의 1일까지 월 단위로 이터레이션."""
+    """start_date의 1일 ~ end_date의 1일까지 월 단위 이터레이션."""
     y, m = start_date.year, start_date.month
     while (y < end_date.year) or (y == end_date.year and m <= end_date.month):
         yield y, m
@@ -76,16 +75,9 @@ def month_iter(start_date, end_date):
             m += 1
 
 def build_month_calendar(year, month, today_kst):
-    """
-    월별 달력(HTML table) 생성.
-    - 어제까지 O/X 확정
-    - 오늘 이후 공백
-    """
-    cal = calendar.monthcalendar(year, month)  # 주: [월..일]이 아니라 설정된 firstweekday 기준
-    # GitHub는 기본 마크다운 테이블보다 HTML 테이블이 칸 꾸미기 유리
+    cal = calendar.monthcalendar(year, month)
     header_days = ["일", "월", "화", "수", "목", "금", "토"]
-    # firstweekday를 반영해서 회전
-    rotate = list(range(7))
+    # firstweekday 반영
     header_days = header_days[-calendar.firstweekday():] + header_days[:-calendar.firstweekday()]
 
     rows_html = []
@@ -98,38 +90,33 @@ def build_month_calendar(year, month, today_kst):
 
             date_obj = datetime.date(year, month, d)
             if date_obj >= today_kst:
-                # 미래/오늘은 빈 칸
-                tds.append(f'<td align="center" valign="top"><div align="right"><sub>{d}</sub></div></td>')
+                # 오늘/미래 날짜는 빈 칸
+                tds.append(
+                    f'<td align="center" valign="top">'
+                    f'<div align="right"><sub>{d}</sub></div>'
+                    f"</td>"
+                )
                 continue
 
             date_str = date_obj.isoformat()
-            dots = []
+            lines = []
             for name in NAMES:
                 flag = judge_day(date_str, name)  # 'O' or 'X'
                 dot = DOT_O if flag == "O" else DOT_X
-                title = f'{name}: {flag}'
-                dots.append(f'<span title="{title}">{dot}</span>')
-            tds.append(
-                '<td align="center" valign="top" style="min-width:96px">'
+                lines.append(f"<div style='font-size:13px'>{name}: {dot}</div>")
+
+            cell_html = (
+                '<td align="center" valign="top" style="min-width:140px">'
                 f'<div align="right"><sub>{d}</sub></div>'
-                f'<div style="font-size: 18px; line-height:1.2">{ "".join(dots) }</div>'
+                + "".join(lines) +
                 "</td>"
             )
+            tds.append(cell_html)
         rows_html.append("<tr>" + "".join(tds) + "</tr>")
-
-    # 범례(이름 순서 고정)
-    legend_items = [f'<li><strong>{i+1}</strong>번째 점: {name}</li>' for i, name in enumerate(NAMES)]
-    legend_html = (
-        '<details><summary>범례 보기</summary>'
-        '<ul style="margin-top:6px">'
-        + "".join(legend_items) +
-        "</ul></details>"
-    )
 
     month_title = f"### {year}-{month:02d} 코딩테스트 달력 (KST)"
     table_html = (
         f"{month_title}\n\n"
-        + legend_html + "\n\n"
         + '<table>'
         + "<thead><tr>" + "".join([f"<th>{d}</th>" for d in header_days]) + "</tr></thead>"
         + "<tbody>" + "".join(rows_html) + "</tbody>"
@@ -138,18 +125,17 @@ def build_month_calendar(year, month, today_kst):
     return table_html
 
 def build_all_months(today_kst):
-    # 리포의 날짜 디렉터리를 스캔해서, 없으면 현재 달만 생성
     date_dirs = find_all_date_dirs()
     if date_dirs:
         start = datetime.date(date_dirs[0].year, date_dirs[0].month, 1)
     else:
         start = datetime.date(today_kst.year, today_kst.month, 1)
 
-    end = datetime.date(today_kst.year, today_kst.month, 1)  # 오늘의 월까지
+    end = datetime.date(today_kst.year, today_kst.month, 1)
     blocks = []
     for y, m in month_iter(start, end):
         block = build_month_calendar(y, m, today_kst)
-        # 과거 달은 접기, 이번 달은 펼침
+        # 이번 달은 기본 펼침, 과거 달은 접기
         is_current = (y == today_kst.year and m == today_kst.month)
         summary = f"{y}-{m:02d}"
         details_open = " open" if is_current else ""
