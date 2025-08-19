@@ -27,8 +27,23 @@ BOT_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}일자 태스크 배정완료, 화이
 def run(cmd):
     return subprocess.check_output(cmd, shell=True, text=True, encoding="utf-8").strip()
 
-# ---------- 커밋/메시지 조회 ----------
+# 파일 단위 조회 
+def nonbot_file_count_on_date(date_str, path):
+    """해당 날짜(KST) 동안 path에 올린 '비봇' 파일 수"""
+    since = f"{date_str} 00:00:00 {TZ_OFFSET}"
+    until = f"{date_str} 23:59:59 {TZ_OFFSET}"
+    cmd = f'git log --since="{since}" --until="{until}" --pretty=format:"" --name-only -- "{path}" || true'
+    out = run(cmd)
+    if not out:
+        return 0
+    files = []
+    for line in out.splitlines():
+        line = line.strip()
+        if line:
+            files.append(line)
+    return len(files)
 
+# ---------- 커밋/메시지 조회 ----------
 def nonbot_commit_count_on_date(date_str, path):
     """해당 날짜(KST) 동안 path를 건드린 '비봇' 커밋 수"""
     since = f"{date_str} 00:00:00 {TZ_OFFSET}"
@@ -159,13 +174,16 @@ def build_month_calendar(year, month, today_kst):
 
                 # 2) 당일 비봇 커밋 수
                 today_nonbot_cnt = nonbot_commit_count_on_date(date_str, path)
+                
+                # 2-1) 당일 비봇 커밋 파일 수(추가됨)
+                  today_file_cnt = nonbot_file_count_on_date(date_str, path)
 
                 # 3) 색상 결정
                 if not has_nonbot:
                     dot = DOT_RED         # 비봇 커밋 없음 → 빨강, n=0
                     n = 0
                 elif n >= GOAL_M:
-                    if today_nonbot_cnt >= GOAL_M:
+                    if today_nonbot_cnt >= GOAL_M or today_file_cnt >= GOAL_M:
                         dot = DOT_GREEN   # 당일 3커밋 이상 + 누적 3개 이상
                     else:
                         dot = DOT_ORANGE  # 누적 3개 이상, 당일 3커밋 미만(레트로 포함 달성)
