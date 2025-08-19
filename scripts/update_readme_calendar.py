@@ -182,11 +182,10 @@ def build_month_calendar(year, month, today_kst):
                 if not has_nonbot:
                     dot = DOT_RED         # 비봇 커밋 없음 → 빨강, n=0
                     n = 0
+                elif today_nonbot_cnt >= GOAL_M or today_file_cnt >= GOAL_M:
+                    dot = DOT_GREEN       # 당일 3커밋 이상 또는 당일 3개 파일 이상
                 elif n >= GOAL_M:
-                    if today_nonbot_cnt >= GOAL_M or today_file_cnt >= GOAL_M:
-                        dot = DOT_GREEN   # 당일 3커밋 이상 + 누적 3개 이상
-                    else:
-                        dot = DOT_ORANGE  # 누적 3개 이상, 당일 3커밋 미만(레트로 포함 달성)
+                    dot = DOT_ORANGE      # 누적 3개 이상, 당일 3커밋 미만(레트로 포함 달성)
                 else:
                     dot = DOT_YELLOW      # 비봇 커밋은 있으나 누적 < 3
 
