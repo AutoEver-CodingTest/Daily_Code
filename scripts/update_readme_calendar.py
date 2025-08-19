@@ -39,7 +39,7 @@ def nonbot_file_count_on_date(date_str, path):
     files = []
     for line in out.splitlines():
         line = line.strip()
-        if line:
+        if line and os.path.basename(line) != ".gitkeep":
             files.append(line)
     return len(files)
 
@@ -176,7 +176,7 @@ def build_month_calendar(year, month, today_kst):
                 today_nonbot_cnt = nonbot_commit_count_on_date(date_str, path)
                 
                 # 2-1) 당일 비봇 커밋 파일 수(추가됨)
-                  today_file_cnt = nonbot_file_count_on_date(date_str, path)
+                today_file_cnt = nonbot_file_count_on_date(date_str, path)
 
                 # 3) 색상 결정
                 if not has_nonbot:
