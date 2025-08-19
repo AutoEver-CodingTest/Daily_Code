@@ -184,15 +184,14 @@ def build_month_calendar(year, month, today_kst):
 
                 # 3) 색상 결정
                 if not has_nonbot:
-                    dot = DOT_RED         # 비봇 커밋 없음 → 빨강, n=0
+                    dot = DOT_RED         # 비봇 커밋 없음 → 빨강
                     n = 0
+                elif today_nonbot_cnt >= GOAL_M or today_file_cnt >= GOAL_M:
+                    dot = DOT_GREEN       # 커밋 1개 이상 + 파일 ≥ 목표 → 초록
                 elif n >= GOAL_M:
-                    if today_nonbot_cnt >= GOAL_M or today_file_cnt >= GOAL_M:
-                        dot = DOT_GREEN   # 당일 3커밋 이상 + 누적 3개 이상
-                    else:
-                        dot = DOT_ORANGE  # 누적 3개 이상, 당일 3커밋 미만(레트로 포함 달성)
+                    dot = DOT_ORANGE      # 누적 목표 달성, 당일/과거 파일 부족 → 주황
                 else:
-                    dot = DOT_YELLOW      # 비봇 커밋은 있으나 누적 < 3
+                    dot = DOT_YELLOW      # 비봇 커밋은 있으나 누적 < 목표 → 노랑
 
                 # 4) 표시 (이름: 🟢 (n/3)) 단순 형식
                 lines.append(
