@@ -665,3 +665,9 @@ FodyWeavers.xsd
 
 # End of https://www.toptal.com/developers/gitignore/api/windows,macos,java,c++,c,visualstudio,intellij
 .vscode/
+
+# (추창우) 백준 문제 풀 때 입력을 위한 input.txt 이그노어
+**/input.txt
+
+# (추창우) vscode extension인 code runnder 실행시 생기는 파일들 제거
+**/tempCodeRunnerFile.cpp
