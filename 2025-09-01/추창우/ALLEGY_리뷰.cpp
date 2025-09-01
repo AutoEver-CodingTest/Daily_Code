@@ -104,7 +104,7 @@ int main() {
     }
 
     vector<int> edibleCount(N, 0);
-    best = 1e9;
+    best = 987654321;
 
     search(edibleCount, 0);
 
