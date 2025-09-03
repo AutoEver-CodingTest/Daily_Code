@@ -8,7 +8,7 @@ import os
 import re
 
 # ===== 설정 =====
-NAMES = ["곽태근", "김호집", "오창은", "김태민", "추창우"]
+NAMES = ["곽태근", "김호집", "오창은", "김태민", "추창우", "김대환"]
 READ_ME = "README.md"
 START_MARK = "<!-- PROGRESS_START -->"
 END_MARK = "<!-- PROGRESS_END -->"
@@ -21,7 +21,9 @@ DOT_RED    = "🔴"  # 비봇 커밋 없음 (표시 n=0)
 GOAL_M = 3        # 항상 3
 # ==============
 
+# 달력 첫 요일 설정 (전역)
 calendar.setfirstweekday(WEEK_START)
+
 BOT_REGEX = re.compile(r"^\d{4}-\d{2}-\d{2}일자 태스크 배정완료, 화이팅!$")
 
 def run(cmd):
@@ -146,10 +148,18 @@ def month_iter(start_date, end_date):
         else:
             m += 1
 
+def _weekday_headers():
+    """
+    calendar.firstweekday()는 월=0 … 일=6 (월요일 기준) 스킴을 사용함.
+    헤더를 월요일 기준 배열로 두고 firstweekday로 회전한다.
+    """
+    base_mon_first = ["월", "화", "수", "목", "금", "토", "일"]  # 월=0
+    fw = calendar.firstweekday()
+    return base_mon_first[fw:] + base_mon_first[:fw]
+
 def build_month_calendar(year, month, today_kst):
     cal = calendar.monthcalendar(year, month)
-    header_days = ["일", "월", "화", "수", "목", "금", "토"]
-    header_days = header_days[-calendar.firstweekday():] + header_days[:-calendar.firstweekday()]
+    header_days = _weekday_headers()
 
     rows_html = []
     for week in cal:
@@ -212,8 +222,9 @@ def build_month_calendar(year, month, today_kst):
         "<sub>"
         "🟢 : 당일에 모두 태스크 완료 | "
         "🟠 : 당일에 다 못했으나, 다른날에 모두 태스크 완료 | "
-        "🟡 : 당일에 다 못했고, 다른날에도 다 태스크 못했을때 | "
-        "🔴 : 아에 안했을때 "
+        "🟡 : 당일에 다 못했고, 다른날에도 다 태스크 못했을 때 | "
+        "🔴 : 아예 안 했을 때"
+        "</sub>"
     )
     table_html = (
         f"{month_title}\n\n"
