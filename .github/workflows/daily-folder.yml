@@ -39,7 +39,9 @@ jobs:
           mkdir -p "$ROOT_DIR/김태민"
           mkdir -p "$ROOT_DIR/추창우"
           mkdir -p "$ROOT_DIR/김대환"
-
+          mkdir -p "$ROOT_DIR/김소희"
+          mkdir -p "$ROOT_DIR/유현아"
+          
           # 빈 폴더 커밋을 위해 .gitkeep 파일 추가
           touch "$ROOT_DIR/곽태근/.gitkeep"
           touch "$ROOT_DIR/김호집/.gitkeep"
@@ -47,7 +49,9 @@ jobs:
           touch "$ROOT_DIR/김태민/.gitkeep"
           touch "$ROOT_DIR/추창우/.gitkeep"
           touch "$ROOT_DIR/김대환/.gitkeep"
-
+          touch "$ROOT_DIR/김소희/.gitkeep"
+          touch "$ROOT_DIR/유현아/.gitkeep"
+          
           echo "Created $ROOT_DIR with subfolders."
           echo "TODAY=$TODAY" >> $GITHUB_ENV
           echo "changed=true" >> $GITHUB_OUTPUT
