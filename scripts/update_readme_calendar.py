@@ -8,7 +8,7 @@ import os
 import re
 
 # ===== 설정 =====
-NAMES = ["곽태근", "김호집", "오창은", "김태민", "추창우", "김대환"]
+NAMES = ["곽태근", "김호집", "오창은", "김태민", "추창우", "김대환", "김소희", "유현아"]
 READ_ME = "README.md"
 START_MARK = "<!-- PROGRESS_START -->"
 END_MARK = "<!-- PROGRESS_END -->"
