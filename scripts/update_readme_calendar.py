@@ -18,7 +18,8 @@ DOT_GREEN  = "🟢"  # 그날 3커밋 이상 + 누적 3개 이상
 DOT_ORANGE = "🟠"  # 누적 3개 이상(레트로 달성 포함), 당일 3커밋 미만
 DOT_YELLOW = "🟡"  # 비봇 커밋은 있으나 누적 < 3
 DOT_RED    = "🔴"  # 비봇 커밋 없음 (표시 n=0)
-GOAL_M = 3        # 항상 3
+GOAL_M = 3         # 항상 3
+PENALTY_PER_SHORT = 1000  # 미달 1개당 1,000원
 # ==============
 
 # 달력 첫 요일 설정 (전역)
@@ -125,7 +126,30 @@ def display_total_files_and_has_nonbot(path):
     files, _ = files_excluding_gitkeep_at_commit(nonbot_hash, path)
     return len(files), True
 
-# ---------- 렌더링 로직 ----------
+# ---- 특정 시각 기준 스냅샷(벌금 판정에 사용) ----
+
+def files_count_as_of(path, cutoff_dt_kst):
+    """
+    cutoff_dt_kst(KST, naive date/datetime 허용) 시각 이전(포함) 마지막 커밋 기준으로
+    path 아래 .gitkeep 제외 파일 개수를 반환.
+    레트로 채우기(다음날 보완) 판정을 위해 사용.
+    """
+    if isinstance(cutoff_dt_kst, datetime.date) and not isinstance(cutoff_dt_kst, datetime.datetime):
+        cutoff_str = f"{cutoff_dt_kst.isoformat()} 23:59:59 {TZ_OFFSET}"
+    else:
+        # datetime인 경우 그대로 사용
+        cutoff_str = cutoff_dt_kst.strftime(f"%Y-%m-%d %H:%M:%S {TZ_OFFSET}")
+
+    # cutoff 이전(포함) path 관련 마지막 커밋 해시
+    cmd = f'git rev-list -1 --before="{cutoff_str}" HEAD -- "{path}" || true'
+    out = run(cmd)
+    commit = out.strip()
+    if not commit:
+        return 0
+    files, _ = files_excluding_gitkeep_at_commit(commit, path)
+    return len(files)
+
+# ---------- 날짜/주차 유틸 ----------
 
 def find_all_date_dirs():
     dates = []
@@ -157,13 +181,69 @@ def _weekday_headers():
     fw = calendar.firstweekday()
     return base_mon_first[fw:] + base_mon_first[:fw]
 
+def is_weekday(date_obj):
+    # 월(0)~금(4)만 True
+    return date_obj.weekday() <= 4
+
+# ---------- 벌금 계산 로직 ----------
+
+def compute_penalty_for_day(name, date_obj, today_kst):
+    """
+    특정 사람(name)의 특정 날짜(date_obj)에 대한 벌금(원)을 계산.
+    규칙:
+      - 평일만 대상 (주말은 0원)
+      - 목표: 3개
+      - D일 목표 미달이어도 D+1 23:59:59 KST까지 3개 채우면 벌금 0원
+      - D+2(유예 다음날의 다음날)부터 미달이 확정되며, 미달 1개당 1,000원
+    """
+    if not is_weekday(date_obj):
+        return 0
+
+    # 유예 마감일(D+1) 기준으로 스냅샷을 본다.
+    grace_deadline = date_obj + datetime.timedelta(days=1)
+
+    # 아직 유예 기간이 끝나지 않았으면 벌금 계산 보류(0원)
+    # (오늘 기준 날짜 비교: D+2 <= today 여야 확정)
+    if date_obj + datetime.timedelta(days=2) > today_kst:
+        return 0
+
+    date_str = date_obj.isoformat()
+    path = f"{date_str}/{name}"
+
+    # 유예 마감일 기준 스냅샷에서 파일 개수
+    as_of_count = files_count_as_of(path, datetime.datetime(grace_deadline.year, grace_deadline.month, grace_deadline.day, 23, 59, 59))
+    short = max(0, GOAL_M - as_of_count)
+    return short * PENALTY_PER_SHORT
+
+def compute_week_penalties(year, month, week_day_numbers, today_kst):
+    """
+    달력 한 주(week)의 셀 숫자 배열(예: [0,1,2,3,4,5,6] 형태)과 연/월을 받아
+    사람별 주간 벌금 합계를 dict로 반환.
+    """
+    penalties = {name: 0 for name in NAMES}
+    # week_day_numbers는 monthcalendar의 한 주(7칸) 숫자들 (0은 타월/빈칸)
+    for i, d in enumerate(week_day_numbers):
+        if d == 0:
+            continue
+        date_obj = datetime.date(year, month, d)
+        # 월 경계 주라도, 해당 월에 실제 날짜가 있는 칸만 고려
+        for name in NAMES:
+            penalties[name] += compute_penalty_for_day(name, date_obj, today_kst)
+    return penalties
+
+# ---------- 렌더링 로직 ----------
+
 def build_month_calendar(year, month, today_kst):
     cal = calendar.monthcalendar(year, month)
     header_days = _weekday_headers()
 
+    # 헤더에 '벌금' 추가(주별 합계 표시 열)
+    header_html = "<thead><tr>" + "".join([f"<th>{d}</th>" for d in header_days]) + "<th>벌금(주)</th></tr></thead>"
+
     rows_html = []
     for week in cal:
         tds = []
+        # 본문: 일~토~일(설정에 따름) 각각 렌더링
         for d in week:
             if d == 0:
                 tds.append("<td></td>")
@@ -189,7 +269,7 @@ def build_month_calendar(year, month, today_kst):
                 # 2) 당일 비봇 커밋 수
                 today_nonbot_cnt = nonbot_commit_count_on_date(date_str, path)
                 
-                # 2-1) 당일 비봇 커밋의 파일 개수 
+                # 2-1) 당일 비봇 커밋들의 파일 개수 합
                 today_file_cnt = files_in_nonbot_commits_on_date(date_str, path)
 
                 # 3) 색상 결정
@@ -215,6 +295,25 @@ def build_month_calendar(year, month, today_kst):
                 "</td>"
             )
             tds.append(cell_html)
+
+        # ---- 주간 벌금 열 생성 ----
+        week_penalties = compute_week_penalties(year, month, week, today_kst)
+        # 이 주(week)의 범위를 텍스트로 표시 (해당 월 내의 유효 날짜만)
+        week_dates_in_month = [datetime.date(year, month, d) for d in week if d != 0]
+        if week_dates_in_month:
+            week_range_text = f"{week_dates_in_month[0].isoformat()} ~ {week_dates_in_month[-1].isoformat()}"
+        else:
+            week_range_text = ""
+
+        penalty_lines = [f"<div style='font-size:13px'>{name}: {amt:,}원</div>" for name, amt in week_penalties.items()]
+        penalty_cell = (
+            '<td align="left" valign="top" style="min-width:160px">'
+            f"<div><sub>{week_range_text}</sub></div>"
+            + "".join(penalty_lines) +
+            "</td>"
+        )
+        tds.append(penalty_cell)
+
         rows_html.append("<tr>" + "".join(tds) + "</tr>")
 
     month_title = f"### {year}-{month:02d} 코딩테스트 달력 (KST)"
@@ -223,14 +322,16 @@ def build_month_calendar(year, month, today_kst):
         "🟢 : 당일에 모두 태스크 완료 | "
         "🟠 : 당일에 다 못했으나, 다른날에 모두 태스크 완료 | "
         "🟡 : 당일에 다 못했고, 다른날에도 다 태스크 못했을 때 | "
-        "🔴 : 아예 안 했을 때"
+        "🔴 : 아예 안 했을 때<br>"
+        f"벌금 규칙: 평일 기준 1일 목표 {GOAL_M}개, 1개 미달당 {PENALTY_PER_SHORT:,}원. "
+        "미달은 다음날 23:59:59 KST까지 보완 시 면제, 그 이후 확정."
         "</sub>"
     )
     table_html = (
         f"{month_title}\n\n"
         + legend + "\n\n"
         + '<table>'
-        + "<thead><tr>" + "".join([f"<th>{d}</th>" for d in header_days]) + "</tr></thead>"
+        + header_html
         + "<tbody>" + "".join(rows_html) + "</tbody>"
         + "</table>\n"
     )
@@ -266,6 +367,7 @@ def replace_block(original, new_block):
         return original.rstrip() + "\n\n" + START_MARK + "\n" + new_block + "\n" + END_MARK + "\n"
 
 def main():
+    # 오늘(로컬) KST 날짜
     now = datetime.datetime.now(datetime.timezone(datetime.timedelta(hours=9)))
     today_kst = now.date()
 
