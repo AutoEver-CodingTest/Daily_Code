@@ -3,57 +3,50 @@ class Solution {
     static int[] dx = {-1,1,0,0};
     static int[] dy = {0,0,-1,1};
     static char[][] arr;
-    static int X,Y;
+    static int n,m;
 
     public int solution(String[] board) {
-        X = board.length;       // 행
-        Y = board[0].length();  // 열
-
-        arr = new char[X][Y];
+        m = board.length;       // 행
+        n = board[0].length();  // 열
+        
+        arr = new char[m][n];
         
         int startX=0, startY=0;
-        for(int i=0; i<X; i++){
-            for(int j=0; j<Y; j++){
+        for(int i=0; i<m; i++){
+            for(int j=0; j<n; j++ ){
                 arr[i][j]=board[i].charAt(j);
-                if(arr[i][j]=='R'){ // 출발점 찾기
-                    startX=j;
-                    startY=i;
+                if(arr[i][j]=='R'){
+                    startX=j; startY=i;
                 }
             }
         }
-        return bfs(startY,startX); // 행, 열 순서로 넘기기
+        return bfs(startY, startX, arr);
+
     }
-
-    static int bfs(int sy, int sx){
-        boolean[][] visited= new boolean[X][Y];
-        visited[sy][sx]=true;
+    static int bfs(int y, int x, char[][] arr){
+        boolean[][] visited = new boolean[m][n];
+        visited[y][x] = true;
         Queue<int[]> q = new LinkedList<>();
-        q.offer(new int[]{sy,sx,0});
-
+        q.offer(new int[]{y,x,0});
+        
         while(!q.isEmpty()){
-            int[] pre = q.poll();
-            int preY = pre[0];
-            int preX = pre[1];
-            int cnt = pre[2];
-
-            if(arr[preY][preX]=='G') return cnt;
-
-            for(int d=0; d<4; d++){
-                int nowY = preY;
-                int nowX = preX;
-
-                // 미끄러지기
+            int[]pre = q.poll();
+            int py= pre[0], px=pre[1], cnt=pre[2];
+            
+            if (arr[py][px] == 'G') return cnt;;
+            
+            for(int i=0; i<4; i++){
+                int nowX = px, nowY=py;
                 while(true){
-                    int nY = nowY + dx[d];
-                    int nX = nowX + dy[d];
-                    if(nY<0 || nY>=X || nX<0 || nX>=Y) break;
-                    if(arr[nY][nX]=='D') break;
-                    nowY = nY;
-                    nowX = nX;
+                    int nextX = nowX +dx[i];
+                    int nextY = nowY +dy[i];
+                    
+                    if (nextX < 0 || nextX >= n || nextY < 0 || nextY >= m) break;
+                    if (arr[nextY][nextX] == 'D') break;
+                    nowX = nextX; nowY= nextY;
                 }
-
                 if(!visited[nowY][nowX]){
-                    visited[nowY][nowX] = true;
+                    visited[nowY][nowX]=true;
                     q.offer(new int[]{nowY,nowX,cnt+1});
                 }
             }
