@@ -1,7 +1,7 @@
 import java.io.*;
 import java.util.*;
 
-public class Main {
+class Main {
   static int n;
 
   // 배열의 범위 초과 방지를 위해 +1 씩
